@@ -10,3 +10,9 @@ RSpecのための環境構築を行った。
 spec/rails_helper.rbを編集し、factory botのセットアップを行った。
 spec/factories/users.rbとspec/factories/tasks.rbにfactory botを利用して定義した。
 spec/models/task_spec.rbにテストケースを記載した。
+
+2025-6-16
+システムスペックについて学んだ。
+初めて解ける前に解答を見てしまった。
+解答例の通りにやったはずなのに、エラーが出てインデントを直したらエラーが増えた。
+明日もう一度挑戦し無理なら質問フォームを使うことにする。
