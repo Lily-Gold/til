@@ -39,3 +39,7 @@ tags/index.html.slim
 
 tags/edit.html.slim
 - breadcrumb :edit_admin_tag, @tag
+
+2025-07-17
+テキスト挿入時、テキストを入力せずにプレビューページを表示するとエラーが発生するバグを修正。
+sentence.body を sentence.body ||= '' に変更し、nilのときは空文字を代入するようにしてエラーを防止。
