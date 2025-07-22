@@ -97,7 +97,51 @@ sentence.body を sentence.body ||= '' に変更し、nilのときは空文字�
 	•	lib/tasks/article_state.rake
 	•	公開待ち記事のステータスを自動で「公開」に変更するタスクを追加：
   namespace :article_state do
-  task update_article_state: :environment do
-    Article.publish_wait.past_published.find_each(&:published!)
+    task update_article_state: :environment do
+      Article.publish_wait.past_published.find_each(&:published!)
+    end
   end
-end
+
+2025-07-22
+検索機能の追加
+1. コントローラーで検索条件のパラメータを許可
+app/controllers/admin/articles_controller.rb
+params[:q]&.permit(:title, :category_id, :author_id, :body, :tag_id)
+→ 記事一覧ページの検索で、カテゴリ・著者・タグ・記事内容・タイトルのパラメータを受け取れるように設定。
+
+2. 検索フォームの定義（フォームオブジェクト）
+app/forms/search_articles_form.rb
+attribute :author_id, :integer
+attribute :tag_id, :integer
+attribute :body, :string
+→ 著者・タグ・記事本文の検索条件をフォームオブジェクトで定義。
+
+relation = relation.by_author(author_id) if author_id.present?
+    relation = relation.by_tag(tag_id) if tag_id.present?
+    body_words.each do |word|
+      relation = relation.body_contain(word)
+    end
+→ 検索時に入力があるものだけ絞り込みクエリを実行。
+
+def body_words
+    body.present? ? body.split(nil) : []
+  end
+→ 記事本文の検索は、スペース区切りで複数キーワード検索に対応。
+
+3. モデルの検索スコープ定義
+app/models/article.rb
+scope :by_author, ->(author_id) { where(author_id: author_id) }
+scope :by_tag, ->(tag_id) { joins(:article_tags).where(article_tags: { tag_id: tag_id }) }
+scope :body_contain, ->(word) { joins(:sentences).where('sentences.body LIKE ?', "%#{word}%") }
+	•	by_author → 著者IDで絞り込み
+	•	by_tag → 記事タグの中間テーブル経由で絞り込み
+	•	body_contain → 記事の本文（sentencesテーブル）でキーワード検索
+
+4. 検索フォームのUI実装
+app/views/admin/articles/index.html.slim
+ => f.select :category_id, Category.pluck(:name, :id), { include_blank: 'カテゴリ' }, class: 'form-control'
+ => f.select :author_id, Author.pluck(:name, :id), { include_blank: '著者' }, class: 'form-control'
+ => f.select :tag_id, Tag.pluck(:name, :id), { include_blank: 'タグ' }, class: 'form-control'
+ => f.search_field :body, class: 'form-control', placeholder: '記事内容'
+   = f.search_field :title, placeholder: 'タイトル', class: 'form-control'
+→ 管理画面で「カテゴリ・著者・タグ・記事本文・タイトル」で複合検索できるUIを実装。
