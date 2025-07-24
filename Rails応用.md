@@ -145,3 +145,50 @@ app/views/admin/articles/index.html.slim
  => f.search_field :body, class: 'form-control', placeholder: '記事内容'
    = f.search_field :title, placeholder: 'タイトル', class: 'form-control'
 → 管理画面で「カテゴリ・著者・タグ・記事本文・タイトル」で複合検索できるUIを実装。
+
+2025-07-24
+アクション権限の調整
+1. アクションごとのアクセス制限を追加
+app/policies/taxonomy_policy.rb
+def index?
+  user.admin? || user.editor?
+end
+
+def update?
+  user.admin? || user.editor?
+end
+
+def destroy?
+  user.admin? || user.editor?
+end
+✔ 補足：
+管理者 (admin) または 編集者 (editor) のみが
+	•	一覧表示（index）
+	•	編集（update）
+	•	削除（destroy）
+を実行できるように、ポリシーで権限を制限。
+
+2. 認可エラー発生時の挙動を調整
+config/application.rb
+config.action_dispatch.rescue_responses["Pundit::NotAuthorizedError"] = :forbidden
+✔ 補足：
+Punditで authorize に失敗（＝許可されていない操作）すると、
+403 Forbidden エラーとして処理されるように設定。
+→ 従来の「500エラー（内部サーバーエラー）」のような表示を避け、適切なステータスで返す。
+
+3. 403エラー時の画面を用意
+public/403.html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>権限がありません(403)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+
+<body>
+<p>権限がありません。</p>
+</body>
+</html>
+✔ 補足：
+ユーザーが許可されていない操作をしようとした場合に表示される静的エラーページ。
+→ 403 Forbidden に対応したシンプルなUIを表示。
