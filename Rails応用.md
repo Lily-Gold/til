@@ -192,3 +192,129 @@ public/403.html
 ✔ 補足：
 ユーザーが許可されていない操作をしようとした場合に表示される静的エラーページ。
 → 403 Forbidden に対応したシンプルなUIを表示。
+
+2025-07-26
+アイキャッチの表示サイズ / 位置指定
+1. 管理画面で位置・サイズを指定できるように
+app/controllers/admin/articles_controller.rb
+	•	Strong Parameters に以下を追加：
+:eyecatch_align, :eyecatch_width
+→ 記事作成・編集時にアイキャッチの**位置（左寄せ・中央・右寄せ）と横幅（100〜700px）**を指定できるようにする。
+
+2. モデルにカラム・バリデーションを追加
+app/models/article.rb
+	•	カラム概要：
+eyecatch_align :integer, default: 0, null: false  # left: 0, center: 1, right: 2
+eyecatch_width :integer                           # 任意の横幅（100〜700）
+
+	•	enumで位置を選択肢化：
+enum eyecatch_align: { left: 0, center: 1, right: 2 }
+	•	バリデーション：
+validates :eyecatch_width,
+          numericality: { less_than_or_equal_to: 700, greater_than_or_equal_to: 100 },
+          allow_blank: true
+
+3. 管理画面で設定できるようにビューを修正
+app/views/admin/articles/edit.html.slim
+	•	ラジオボタンで位置選択、数値入力で幅指定を実装：
+= f.input_field :eyecatch_align, as: :radio_buttons
+= f.input :eyecatch_width, placeholder: '100'
+
+4. 記事表示側で反映
+app/views/shared/_article.html.slim
+	•	クラスに text-#{article.eyecatch_align} を適用し、Bootstrapなどで整列。
+	•	image_tag に width: article.eyecatch_width を渡して任意幅指定。
+section class="eye_catch text-#{article.eyecatch_align}"
+  = image_tag article.eye_catch_url(:lg), class: 'img-fluid', width: article.eyecatch_width
+
+5. i18n対応
+config/locales/activerecord.ja.yml
+eyecatch_align: '位置'
+eyecatch_width: '横幅'
+
+config/locales/enums.ja.yml
+eyecatch_align:
+  left: '左寄せ'
+  center: '中央'
+  right: '右寄せ'
+
+6. マイグレーションファイル
+db/migrate/×××××_add_eye_catch_info_to_articles.rb
+class AddEyeCatchInfoToArticles < ActiveRecord::Migration[7.0]
+  def change
+    add_column :articles, :eyecatch_align, :integer, default: 0, null: false
+    add_column :articles, :eyecatch_width, :integer
+  end
+end
+
+db/schema.rb
+t.integer "eyecatch_align", default: 0, null: false
+t.integer "eyecatch_width"
+
+2025-07-27
+埋め込みメディアタイプにTwitterの追加
+1. 埋め込み種別の追加
+app/models/embed.rb
+enum embed_type: { youtube: 0, twitter: 1 }
+	•	Embed モデルで、埋め込みのタイプを識別するために enum を使用。
+	•	youtube? / twitter? で埋め込みタイプを条件分岐できるようになります。
+
+2. YouTube埋め込みIDの整形
+def split_id_from_youtube_url
+    # YoutubeならIDのみ抽出
+    identifier.split('/').last if youtube?
+  end
+	•	以前は identifier に YouTube動画の IDだけ を直接保存していたが、今後はURL形式で保存。
+	•	このメソッドで、URLからID部分（例: "https://youtu.be/abc123" → "abc123"）を抽出
+
+3. 表示アイコンの切り替え
+app/decorators/article_block_decorator.rb
+blockable.youtube? ? '<i class="fa fa-youtube-play"></i>'.html_safe : '<i class="fa fa-twitter"></i>'.html_safe
+	•	記事ブロックの装飾（UI）で、YouTubeとTwitterのアイコンを出し分け。
+
+4. ブロック挿入画面でのUI
+app/views/admin/articles/article_blocks/_insert_block.html.slim
+ .d-inline-flex
+            i.fa.fa-youtube-play
+            i.fa.fa-twitter
+	•	管理画面でのブロック挿入UIに、Twitterブロックの選択肢を追加。
+
+5. 埋め込み表示の切り替え
+app/views/admin/articles/article_blocks/_show_embed.html.slim
+- if embed.identifier?
+    - if embed.youtube?
+
+    - if embed.twitter?
+      = render 'shared/embed_twitter', embed: embed
+	•	記事に埋め込まれた動画・投稿を表示する際に、タイプに応じて部分テンプレートを切り替え。
+
+6. 表示用テンプレートの追加
+Twitter用: app/views/shared/_embed_twitter.html.slim
+script async="" charset="utf-8" src="https://platform.twitter.com/widgets.js"
+.embed-twitter
+  blockquote.twitter-tweet
+    a href="#{embed.identifier}"
+
+YouTube用: app/views/shared/_embed_youtube.html.slim
+= content_tag 'iframe', nil, width: width, height: height, src: "https://www.youtube.com/embed/#{embed.split_id_from_youtube_url}", \
+	•	Twitter は blockquote + TwitterウィジェットJSを使って埋め込み表示
+  •	YouTube は <iframe> で埋め込み
+
+7. 表示ラベルの日本語化
+config/locales/enums.ja.yml
+twitter: 'Twitter'
+	•	enumの表示に対応するラベルを追加（管理画面などで「Twitter」と日本語で表示）
+
+8. データ移行用Rakeタスク
+lib/tasks/temp/fix_embed_youtube_identifier.rake
+namespace :fix_embed_youtube_identifier do
+  desc 'IDを入力していたidentiferカラムの過去データを一括で修正'
+  task update_old_identifier_for_youtube_embed: :environment do
+    Embed.youtube.each do |embed|
+      embed.update(identifier: "https://youtu.be/#{embed.identifier}")
+    end
+  end
+end
+	•	過去データの修正用タスク。
+	•	以前は "abc123" のようにIDだけを保存していたが、今後は "https://youtu.be/abc123" のようにURL形式で保存。
+	•	このタスクは全 youtube タイプの identifier に "https://youtu.be/" をプレフィックスとして付け直すもの。
