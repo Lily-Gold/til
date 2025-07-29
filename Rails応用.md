@@ -319,5 +319,171 @@ end
 	•	以前は "abc123" のようにIDだけを保存していたが、今後は "https://youtu.be/abc123" のようにURL形式で保存。
 	•	このタスクは全 youtube タイプの identifier に "https://youtu.be/" をプレフィックスとして付け直すもの。
 
-2025-07-28
-Rails応用９途中、明日は削除機能
+2025-07-29
+トップ画像をスライダー形式に変更
+1. Swiper ライブラリの導入
+package.json
+"swiper": "11.1.14"
+→ Swiper を バージョン指定して導入。画像スライダー機能を実現するためのフロントエンドライブラリ。
+導入コマンド
+docker compose exec web bash
+# yarn add swiper@11.1.14
+2. ビルド実行
+docker compose exec web yarn build
+→ esbuild により、app/javascript/*.* をビルドして app/assets/builds に出力。JS の変更を Rails に反映させる。
+
+app/javascripts/application.js
+import Swiper from 'swiper';
+import 'swiper/css';
+→ Swiper のデフォルトスタイルを適用。以下は独自スタイル：
+document.addEventListener('DOMContentLoaded', () => {
+  new Swiper('.swiper-container', {
+    loop: true,
+    autoplay: {
+      delay: 3000,
+    },
+  });
+});
+→ Swiper の 初期化スクリプト。画像のループ表示と3秒ごとの自動再生設定。
+
+app/assets/stylesheets/application.scss
+@import 'swiper/swiper-bundle';
+→ Swiper のデフォルトスタイルを適用。以下は独自スタイル：
+header {
+  position: relative;
+
+  .swiper-container {
+    img {
+      width: 100%;
+      height: 400px;
+      object-fit: cover;
+    }
+  }
+
+  .blog-title {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    z-index: 10;
+    a {
+      color: white;
+    }
+  }
+}
+→ スライダーの画像サイズ調整と、ブログタイトルのセンタリング。
+
+3. 管理画面で画像をアップロード・削除可能に
+app/models/site.rb
+has_many_attached :main_images
+
+validates :main_images, attachment: { purge: true, content_type: %r{\Aimage/(png|jpeg)\Z}, maximum: 524_288_000 }
+→ main_images を複数アップロード可能に。JPEG/PNG のみ、最大500MB。
+
+app/controllers/admin/sites_controller.rb
+params.require(:site).permit(:name, :subtitle, :description, :favicon, :og_image, main_images: [])
+→ 複数画像（main_images）の strong parameters 許可。
+
+app/controllers/admin/site/attachments_controller.rb
+class Admin::Site::AttachmentsController < ApplicationController
+  def destroy
+    authorize(current_site)
+    image = ActiveStorage::Attachment.find(params[:id])
+    image.purge
+    redirect_to edit_admin_site_path
+  end
+end
+→ 任意の画像を削除可能にする処理。
+
+app/policies/site_policy.rb
+def destroy?
+  user.admin?
+end
+→ 削除権限を管理者のみに限定。
+
+app/validators/attachment_validator.rb
+if value.is_a?(ActiveStorage::Attached::Many)
+        # 画像が複数枚投稿された場合
+        value.each do |v|
+          unless validate_maximum(record, attribute, v)
+            has_error = true
+            break
+          end
+        end
+      else
+        # 画像が1枚投稿された場合
+        has_error = true unless validate_maximum(record, attribute, value)
+      end
+
+if value.is_a?(ActiveStorage::Attached::Many)
+        # 画像が複数枚投稿された場合
+        value.each do |v|
+          unless validate_content_type(record, attribute, v)
+            has_error = true
+            break
+          end
+        end
+      else
+        # 画像が1枚投稿された場合
+        has_error = true unless validate_content_type(record, attribute, value)
+      end
+→ main_images の 拡張バリデーション（content_type や 最大容量 を複数枚でも確認できるようにした）。
+
+app/views/admin/sites/edit.html.slim
+= link_to '削除', admin_site_attachment_path(@site.favicon.id),
+          method: :delete, class: 'btn btn-danger'
+        br
+        br
+
+= link_to '削除', admin_site_attachment_path(@site.og_image.id),
+          method: :delete, class: 'btn btn-danger'
+        br
+        br
+→ 管理画面で画像アップロード・確認・削除が可能に。        
+      = f.input :main_images, as: :file, input_html: {multiple: true}, hint: 'JPEG/PNG (1200x400)'
+
+→ main_images を複数同時に選択できる。
+      - if @site.main_images.attached?
+        .main_images_box
+          - @site.main_images.each do |main_image|
+            .main_image
+              = image_tag main_image.variant(resize:'300x100').processed
+              = link_to '削除', admin_site_attachment_path(main_image.id),
+                method: :delete, class: 'btn btn-danger'
+
+📂app/assets/stylesheets/admin.scss
+.main_images_box {
+  display: flex;
+  .main_image {
+    text-align: center;
+    padding: 1rem;
+    img {
+      display: block;
+      margin-bottom: 1rem;
+    }
+  }
+}
+→ アップロード画像のプレビューを横並びにし、見やすくレイアウト。
+
+app/views/layouts/_header.html.slim
+header
+  .swiper-container
+    .swiper-wrapper
+      - if current_site.main_images.present?
+        - current_site.main_images.each do |main_image|
+          = image_tag url_for(main_image), class: 'swiper-slide'
+      - else
+        = image_tag '/images/cover.jpg', class: 'swiper-slide'
+  .container.blog-title
+→ トップページで main_images を Swiper 形式で表示。無い場合はデフォルト画像表示。
+
+config/initializers/assets.rb
+Rails.application.config.assets.paths << Rails.root.join('node_modules')
+→ swiper/css などのスタイルを読み込めるように、node_modules を asset path に追加。
+
+config/routes.rb
+resource :site, only: %i[edit update] do
+  resources :attachments, controller: 'site/attachments', only: %i[destroy]
+end
+→ main_images の個別削除用ルーティングを追加。
