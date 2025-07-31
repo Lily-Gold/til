@@ -452,7 +452,7 @@ app/views/admin/sites/edit.html.slim
               = link_to '削除', admin_site_attachment_path(main_image.id),
                 method: :delete, class: 'btn btn-danger'
 
-📂app/assets/stylesheets/admin.scss
+app/assets/stylesheets/admin.scss
 .main_images_box {
   display: flex;
   .main_image {
@@ -487,3 +487,82 @@ resource :site, only: %i[edit update] do
   resources :attachments, controller: 'site/attachments', only: %i[destroy]
 end
 → main_images の個別削除用ルーティングを追加。
+
+whenever による記事数一覧のメール送信
+app/mailers/application_mailer.rb
+class ApplicationMailer < ActionMailer::Base
+  default from: 'from@example.com'
+  layout 'mailer'
+end
+
+2025-07-31
+whenever による記事数一覧のメール送信
+app/mailers/article_mailer.rb
+class ArticleMailer < ApplicationMailer
+  def report_summary
+    @published_article_count = Article.published.count
+    @articles_published_at_yesterday = Article.published_at_yesterday
+    mail(to: 'admin@example.com', subject: '公開済記事の集計結果')
+  end
+end
+	•	@published_article_count: 全公開済記事の件数
+	•	@articles_published_at_yesterday: 昨日公開された記事の一覧（scopeを使って取得）
+	•	mail(...): 管理者にメール送信（text + html形式）
+
+app/models/article.rb
+scope :by_tag, ->(tag_id) { joins(:article_tags).where(article_tags: { tag_id: tag_id }) }
+  scope :published_at_yesterday, -> { where(published_at: 1.day.ago.all_day) }
+
+  def build_body(controller)
+    result = ''
+	•	1.day.ago.all_day: 昨日の0:00〜23:59をカバーする便利なActiveSupportの範囲オブジェクト
+※ published スコープは事前定義されていると仮定（なければ where.not(published_at: nil) など必要）
+
+app/views/article_mailer/report_summary.text.erb
+公開済の記事数: <%= @published_article_count %>件
+
+<% if @articles_published_at_yesterday.present? %>
+  昨日公開された記事数: <%= @articles_published_at_yesterday.count %>件
+  <% @articles_published_at_yesterday.each do |article| %>
+    タイトル: <%= article.title  %>
+    公開日時: <%= l(article.published_at) %>
+  <% end %>
+<% else %>
+  昨日公開された記事はありません
+<% end %>
+	•	テキストメールテンプレート
+	•	l(...): localize の略。日時をロケール設定に基づいて整形
+
+app/views/layouts/mailer.html.slim
+html
+  body
+    = yield
+
+app/views/layouts/mailer.text.slim
+= yield
+	•	RailsのMailer用レイアウト
+	•	yield によって各メールテンプレートが挿入される
+
+config/environments/development.rb
+config.action_mailer.delivery_method = :letter_opener_web
+  config.action_mailer.default_url_options = { host: 'localhost:3000' }
+	•	開発環境では letter_opener_web を使用 → メールがブラウザで確認できる
+	•	http://localhost:3000/letter_opener で確認
+
+config/schedule.rb
+every 1.day, at: '9am' do
+  rake 'article_summary:mail_article_summary'
+end
+	•	whenever 用スケジュール設定
+	•	毎朝9:00に rake task を実行
+※ whenever 実行後には crontab -l で登録確認可能
+
+lib/tasks/article_summary.rake
+namespace :article_summary do
+  desc '管理者に対して総記事数、昨日公開された記事数とタイトルをメールで送信'
+  task mail_article_summary: :environment do
+    ArticleMailer.report_summary.deliver_now
+  end
+end
+	•	Rakeタスクでメールを即時送信
+	•	:environment を依存にすることで、モデルやMailerが利用可能に
