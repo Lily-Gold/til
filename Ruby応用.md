@@ -47,3 +47,6 @@ def algorithm_04(text)
   end
   counts
 end
+
+2025-08-15
+ゼロからわかるGit完全マスター講座 ～初学者からチーム開発で活躍できるエンジニアへ～
